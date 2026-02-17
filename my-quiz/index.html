@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>過年紅包挑戰賽 - 最終合併雲端版</title>
+    <style>
+        :root { --gold: #fbbf24; --red: #b91c1c; --dark-red: #7f1d1d; }
+        body { background: radial-gradient(#ef4444, #991b1b); color: #fef3c7; font-family: 'Microsoft JhengHei', sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        
+        #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #b91c1c; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; font-size: 1.5rem; text-align: center; }
+        .loading-icon { font-size: 4rem; margin-bottom: 20px; animation: bounce 1s infinite; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+
+        .status-bar { position: sticky; top: 10px; background: rgba(0, 0, 0, 0.85); padding: 12px 25px; border-radius: 50px; border: 2px solid var(--gold); display: flex; align-items: center; gap: 15px; z-index: 100; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .total-amount { font-size: 1.5rem; font-weight: bold; color: var(--gold); }
+        .grade-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 600px; }
+        .packet { width: 100px; height: 140px; background: #fde68a; border: 3px solid var(--gold); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; transition: 0.3s; color: var(--red); box-shadow: 0 6px 0 #92400e; }
+        .packet.locked { background: #4b5563; border-color: #374151; color: #9ca3af; opacity: 0.6; cursor: not-allowed; }
+        
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 200; }
+        .modal-content { background: #fff; color: #333; padding: 25px; border-radius: 20px; width: 85%; max-width: 400px; text-align: center; border: 5px solid var(--gold); }
+        .subject-btn, .option-btn { display: block; width: 100%; padding: 12px; margin: 8px 0; font-size: 1rem; border: 2px solid var(--red); border-radius: 10px; background: white; cursor: pointer; font-weight: bold; }
+        .subject-btn.disabled { background: #e5e7eb; border-color: #9ca3af; color: #9ca3af; cursor: not-allowed; text-decoration: line-through; }
+        .subject-btn.failed { background: #fca5a5; border-color: #ef4444; color: var(--red); cursor: not-allowed; }
+        
+        .revive-area { display: none; background: #fff1f2; padding: 15px; border-radius: 15px; border: 2px solid #e11d48; }
+        .revive-badge { background: #e11d48; color: white; padding: 4px 10px; border-radius: 5px; font-size: 0.8rem; margin-bottom: 10px; display: inline-block; }
+        
+        #gameOverOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 300; }
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="loading-icon">🧧</div>
+        <div>正在與雲端同步題庫...</div>
+    </div>
+
+    <div class="status-bar">
+        <span>💰 錢包：<span class="total-amount" id="balance">0</span> 元</span>
+    </div>
+
+    <h1>🧨 過年紅包挑戰賽 🧧</h1>
+    <div class="grade-container" id="gradeBoard"></div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal-content">
+            <div id="selectionArea">
+                <h2 id="modalTitle">選擇科目</h2>
+                <div id="subjectList"></div>
+            </div>
+            <div id="reviveArea" class="revive-area">
+                <div class="revive-badge" id="reviveLevelBadge">復活關卡</div>
+                <p id="questionText" style="font-size: 1.2rem; font-weight: bold;"></p>
+                <div id="optionList"></div>
+            </div>
+            <div onclick="closeModal()" style="margin-top:15px; cursor:pointer; color:#888; font-size: 0.9rem;">先不挑戰了</div>
+        </div>
+    </div>
+
+    <div id="gameOverOverlay">
+        <h1 style="color: #ef4444; font-size: 3rem;">遊戲結束</h1>
+        <div style="background: var(--gold); color: var(--red); padding: 20px; border-radius: 15px; margin: 20px;">
+            <p>最終獲得紅包</p>
+            <h2 id="finalBalance" style="font-size: 2.5rem; margin: 0;">$0</h2>
+        </div>
+        <button onclick="location.reload()" style="padding: 10px 30px; border-radius: 10px; border: none; cursor: pointer; font-weight: bold;">重新挑戰</button>
+    </div>
+
+    <script>
+        // --- 更新後的 API 網址 ---
+        const API_URL_MAIN = 'https://api.sheety.co/a455fcb7629fb36ea2c39ca69080d6c5/question/1';
+        const API_URL_REVIVE = 'https://api.sheety.co/a455fcb7629fb36ea2c39ca69080d6c5/question/2'; 
+
+        let mainQuizzes = {}; 
+        let reviveQuizzes = { "會考題": [], "學測題": [], "藥師國考題": [] };
+        let reviveCounters = { "會考題": 0, "學測題": 0, "藥師國考題": 0 };
+
+        const grades = ["小一", "小二", "小三", "小四", "小五", "小六", "國一", "國二", "國三", "高一", "高二", "高三"];
+        const subjectsData = {
+            "國小": ["國文", "健康與體育", "數學", "生活", "英語"],
+            "國中": ["國文", "數學", "英文", "自然", "社會"],
+            "高中": ["生物", "地科", "化學", "歷史", "地理", "公民"]
+        };
+
+        let userProgress = 1, currentBalance = 0, lastUsedSubject = "", failedSubjects = [], failCount = 0, currentGradeIdx = 0;
+
+        // --- 核心：從雲端抓取與防錯解析 ---
+        async function fetchAllQuizzes() {
+            try {
+                const [mainRes, reviveRes] = await Promise.all([
+                    fetch(API_URL_MAIN),
+                    fetch(API_URL_REVIVE)
+                ]);
+
+                if (!mainRes.ok || !reviveRes.ok) throw new Error(`API 連線失敗 (${mainRes.status}/${reviveRes.status})`);
+
+                const mainJson = await mainRes.json();
+                const reviveJson = await reviveRes.json();
+
+                // 解析普通題庫
+                const mainKey = Object.keys(mainJson)[0];
+                if (mainJson[mainKey]) {
+                    mainJson[mainKey].forEach((row, i) => {
+                        if (!row.grade || !row.subject || !row.question) return;
+                        if (!mainQuizzes[row.grade]) mainQuizzes[row.grade] = {};
+                        if (!mainQuizzes[row.grade][row.subject]) mainQuizzes[row.grade][row.subject] = [];
+                        mainQuizzes[row.grade][row.subject].push({
+                            q: row.question,
+                            options: row.options ? String(row.options).split(',').map(s => s.trim()) : ["選項缺失"],
+                            a: row.answer ? String(row.answer).trim() : ""
+                        });
+                    });
+                }
+
+                // 解析復活題庫
+                const reviveKey = Object.keys(reviveJson)[0];
+                if (reviveJson[reviveKey]) {
+                    reviveJson[reviveKey].forEach((row, i) => {
+                        if (!row.level || !row.question) return;
+                        if (reviveQuizzes[row.level]) {
+                            reviveQuizzes[row.level].push({
+                                q: row.question,
+                                options: row.options ? String(row.options).split(',').map(s => s.trim()) : ["選項缺失"],
+                                a: row.answer ? String(row.answer).trim() : ""
+                            });
+                        }
+                    });
+                }
+
+                console.log("資料同步完成！");
+                document.getElementById('loader').style.display = 'none';
+                render();
+            } catch (error) {
+                console.error("同步失敗:", error);
+                document.getElementById('loader').innerHTML = `❌ 同步失敗<br><small>${error.message}</small><br><br>請確認 Sheety 控制台 GET 權限已開啟`;
+            }
+        }
+
+        // --- 遊戲邏輯 ---
+        function render() {
+            document.getElementById('balance').innerText = currentBalance;
+            const board = document.getElementById('gradeBoard');
+            board.innerHTML = '';
+            grades.forEach((name, i) => {
+                const isLocked = (i + 1) > userProgress;
+                const isDone = (i + 1) < userProgress;
+                const card = document.createElement('div');
+                card.className = `packet ${isLocked ? 'locked' : ''}`;
+                card.innerHTML = `<h3>${name}</h3><small>${isDone ? '已領取' : '$200'}</small>`;
+                if (!isLocked && !isDone) card.onclick = () => openModal(i);
+                board.appendChild(card);
+            });
+        }
+
+        function openModal(idx) {
+            currentGradeIdx = idx;
+            document.getElementById('modal').style.display = 'flex';
+            if (failCount > 0) showRevive(); else showSelection();
+        }
+
+        function showSelection() {
+            document.getElementById('selectionArea').style.display = 'block';
+            document.getElementById('reviveArea').style.display = 'none';
+            const list = document.getElementById('subjectList');
+            list.innerHTML = '';
+            const type = idxToType(currentGradeIdx);
+            const restriction = ([0, 6, 9].includes(currentGradeIdx)) ? "" : lastUsedSubject;
+            subjectsData[type].forEach(sub => {
+                const btn = document.createElement('button');
+                const isLast = sub === restriction, isFail = failedSubjects.includes(sub);
+                btn.className = `subject-btn ${isLast ? 'disabled' : ''} ${isFail ? 'failed' : ''}`;
+                btn.innerText = sub + (isFail ? " (鎖死)" : "");
+                btn.onclick = () => { if(!isLast && !isFail) loadQuiz(sub); };
+                list.appendChild(btn);
+            });
+        }
+
+        function loadQuiz(sub) {
+            const gradeName = grades[currentGradeIdx];
+            const pool = mainQuizzes[gradeName]?.[sub];
+            if (!pool || pool.length === 0) {
+                alert(`尚未在雲端發現【${gradeName}-${sub}】題目，自動過關！`);
+                success(sub);
+                return;
+            }
+            displayQuestion(pool[Math.floor(Math.random() * pool.length)], sub, false);
+        }
+
+        function showRevive() {
+            if (failCount > 3) return endGame();
+            const levels = ["會考題", "學測題", "藥師國考題"];
+            const curLevel = levels[failCount - 1];
+            const pool = reviveQuizzes[curLevel];
+
+            if (!pool || pool.length === 0) {
+                alert(`雲端尚未設定【${curLevel}】題目！`);
+                return closeModal();
+            }
+
+            // 輪迴機制
+            let idx = reviveCounters[curLevel];
+            const quiz = pool[idx % pool.length]; 
+            reviveCounters[curLevel]++; 
+            displayQuestion(quiz, curLevel, true);
+        }
+
+        function displayQuestion(quiz, sub, isRevive) {
+            document.getElementById('selectionArea').style.display = 'none';
+            document.getElementById('reviveArea').style.display = 'block';
+            document.getElementById('reviveLevelBadge').innerText = isRevive ? `敗部復活 - ${sub}` : `${grades[currentGradeIdx]} - ${sub}`;
+            document.getElementById('questionText').innerText = quiz.q;
+            const optList = document.getElementById('optionList');
+            optList.innerHTML = '';
+
+            quiz.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = opt;
+                btn.onclick = () => {
+                    if (opt === quiz.a) {
+                        if (isRevive) {
+                            alert("🎉 復活成功！請重選科目。");
+                            failCount = 0; showSelection();
+                        } else {
+                            alert("✅ 答對了！");
+                            success(sub);
+                        }
+                    } else {
+                        if (isRevive) {
+                            failCount++;
+                            if (failCount <= 3) {
+                                alert(`❌ 答錯了！難度提升！`);
+                                showRevive();
+                            } else { endGame(); }
+                        } else {
+                            failedSubjects.push(sub);
+                            failCount = 1;
+                            alert(`❌ 答錯了！${sub} 鎖死。進入復活賽：會考題！`);
+                            showRevive();
+                        }
+                    }
+                };
+                optList.appendChild(btn);
+            });
+        }
+
+        function success(sub) { currentBalance += 200; userProgress++; lastUsedSubject = sub; failedSubjects = []; failCount = 0; closeModal(); render(); }
+        function endGame() { document.getElementById('modal').style.display = 'none'; document.getElementById('gameOverOverlay').style.display = 'flex'; document.getElementById('finalBalance').innerText = '$' + currentBalance; }
+        function idxToType(i) { return i < 6 ? "國小" : (i < 9 ? "國中" : "高中"); }
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+
+        fetchAllQuizzes();
+    </script>
+</body>
+</html>

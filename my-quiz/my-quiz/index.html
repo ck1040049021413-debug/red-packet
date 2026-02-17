@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 過年紅包挑戰賽 - 視覺特效版</title>
+    <style>
+        :root { --gold: #fbbf24; --red: #b91c1c; --dark-red: #7f1d1d; --white: #fef3c7; --green: #10b981; }
+        body { background: radial-gradient(#ef4444, #991b1b); color: var(--white); font-family: 'Microsoft JhengHei', sans-serif; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; overflow-x: hidden; }
+        
+        /* 載入畫面 */
+        #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #b91c1c; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 1000; font-size: 1.5rem; text-align: center; }
+        .loading-icon { font-size: 4rem; margin-bottom: 20px; animation: bounce 1s infinite; }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+
+        /* 頂部狀態欄 */
+        .status-bar { position: sticky; top: 10px; background: rgba(0, 0, 0, 0.85); padding: 12px 25px; border-radius: 50px; border: 2px solid var(--gold); display: flex; align-items: center; gap: 15px; z-index: 100; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .total-amount { font-size: 1.5rem; font-weight: bold; color: var(--gold); }
+
+        /* 紅包牆 */
+        .grade-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 600px; width: 100%; }
+        .packet { height: 140px; background: #fde68a; border: 3px solid var(--gold); border-radius: 12px; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; transition: 0.3s; color: var(--red); box-shadow: 0 6px 0 #92400e; position: relative; }
+        .packet:active { transform: translateY(4px); box-shadow: 0 2px 0 #92400e; }
+        .packet.locked { background: #4b5563; border-color: #374151; color: #9ca3af; opacity: 0.6; cursor: not-allowed; box-shadow: 0 6px 0 #1f2937; }
+        .packet.done { background: #f87171; border-color: #b91c1c; color: white; cursor: default; box-shadow: none; transform: none; }
+
+        /* 彈窗樣式 */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 200; }
+        .modal-content { background: #fff; color: #333; padding: 25px; border-radius: 20px; width: 85%; max-width: 400px; text-align: center; border: 5px solid var(--gold); max-height: 80vh; overflow-y: auto; }
+        .subject-btn, .option-btn { display: block; width: 100%; padding: 12px; margin: 8px 0; font-size: 1.1rem; border: 2px solid var(--red); border-radius: 10px; background: white; cursor: pointer; font-weight: bold; }
+        .subject-btn.disabled { background: #e5e7eb; border-color: #9ca3af; color: #9ca3af; cursor: not-allowed; text-decoration: line-through; }
+        .subject-btn.failed { background: #fca5a5; border-color: #ef4444; color: var(--red); cursor: not-allowed; }
+        
+        /* 復活區 */
+        .revive-area { display: none; background: #fff1f2; padding: 15px; border-radius: 15px; border: 2px solid #e11d48; }
+        .revive-badge { background: #e11d48; color: white; padding: 4px 10px; border-radius: 5px; font-size: 0.8rem; margin-bottom: 10px; display: inline-block; }
+
+        /* 答題結果提示 (取代 Alert) */
+        #resultNotice { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 500; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); animation: fadeIn 0.3s; }
+        .notice-card { padding: 40px; border-radius: 30px; text-align: center; transform: scale(0.5); animation: popUp 0.4s forwards; width: 70%; max-width: 300px; }
+        .notice-card.success { background: var(--white); border: 8px solid var(--gold); color: var(--red); }
+        .notice-card.fail { background: #333; border: 8px solid #555; color: #fff; }
+        .notice-icon { font-size: 5rem; margin-bottom: 10px; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes popUp { to { transform: scale(1); } }
+
+        /* 結算畫面 */
+        #gameOverOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 300; text-align: center; padding: 20px; }
+        .result-card { background: var(--gold); color: var(--red); padding: 30px; border-radius: 25px; border: 8px double var(--red); margin: 20px 0; width: 80%; max-width: 400px; }
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="loading-icon">🧧</div>
+        <div>正在與雲端同步 2026 題庫...</div>
+    </div>
+
+    <div id="resultNotice">
+        <div id="noticeCard" class="notice-card">
+            <div id="noticeIcon" class="notice-icon"></div>
+            <h2 id="noticeTitle" style="margin: 10px 0;"></h2>
+            <p id="noticeMsg" style="font-size: 1.1rem;"></p>
+        </div>
+    </div>
+
+    <div class="status-bar">
+        <span>💰 目前累積：<span class="total-amount" id="balance">0</span> 元</span>
+    </div>
+
+    <h1>🧨 過年紅包挑戰賽 🧧</h1>
+    <div class="grade-container" id="gradeBoard"></div>
+
+    <div class="modal-overlay" id="modal">
+        <div class="modal-content">
+            <div id="selectionArea">
+                <h2 id="modalTitle">選擇挑戰科目</h2>
+                <div id="subjectList"></div>
+            </div>
+            <div id="reviveArea" class="revive-area">
+                <div class="revive-badge" id="reviveLevelBadge">復活關卡</div>
+                <p id="questionText" style="font-size: 1.2rem; font-weight: bold; margin: 15px 0; line-height: 1.5;"></p>
+                <div id="optionList"></div>
+            </div>
+            <div onclick="closeModal()" style="margin-top:20px; cursor:pointer; color:#888; font-size: 0.9rem;">先不挑戰了</div>
+        </div>
+    </div>
+
+    <div id="gameOverOverlay">
+        <h1 id="resultTitle" style="color: #fbbf24; font-size: 3rem; margin-bottom: 0;">恭喜發財</h1>
+        <div class="result-card">
+            <p style="margin: 0; font-size: 1.2rem;">最終獲得紅包</p>
+            <h2 id="finalBalance" style="font-size: 3.5rem; margin: 10px 0;">$0</h2>
+            <p id="resultRank" style="font-weight: bold; font-size: 1.1rem; border-top: 1px solid var(--red); padding-top: 10px;"></p>
+        </div>
+        <button style="padding: 15px 40px; font-size: 1.2rem; border-radius: 50px; cursor: pointer; font-weight: bold;" onclick="location.reload()">重新挑戰 🧨</button>
+    </div>
+
+    <script>
+        const API_URL_MAIN = 'https://api.sheety.co/a455fcb7629fb36ea2c39ca69080d6c5/question/1';
+        const API_URL_REVIVE = 'https://api.sheety.co/a455fcb7629fb36ea2c39ca69080d6c5/question/2'; 
+
+        let mainQuizzes = {}; 
+        let reviveQuizzes = { "會考題": [], "學測題": [], "藥師國考題": [] };
+        let reviveCounters = { "會考題": 0, "學測題": 0, "藥師國考題": 0 };
+        const grades = ["小一", "小二", "小三", "小四", "小五", "小六", "國一", "國二", "國三", "高一", "高二", "高三"];
+        const subjectsData = {
+            "國小": ["國文", "健康與體育", "數學", "生活", "鄉土語"],
+            "國中": ["國文", "數學", "英文", "自然", "社會"],
+            "高中": ["生物", "地科", "化學", "歷史", "地理", "公民"]
+        };
+        let userProgress = 1, currentBalance = 0, lastUsedSubject = "", failedSubjects = [], failCount = 0, currentGradeIdx = 0;
+
+        // --- 取代 Alert 的自定義提示函式 ---
+        function showResultNotice(type, title, msg, callback) {
+            const overlay = document.getElementById('resultNotice');
+            const card = document.getElementById('noticeCard');
+            const icon = document.getElementById('noticeIcon');
+            
+            overlay.style.display = 'flex';
+            card.className = `notice-card ${type}`; // 'success' or 'fail'
+            icon.innerText = type === 'success' ? '✅' : '❌';
+            document.getElementById('noticeTitle').innerText = title;
+            document.getElementById('noticeMsg').innerText = msg;
+
+            // 顯示 1.5 秒後自動消失並執行後續動作
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                if (callback) callback();
+            }, 1500);
+        }
+
+        async function fetchAllQuizzes() {
+            try {
+                const [mR, rR] = await Promise.all([fetch(API_URL_MAIN), fetch(API_URL_REVIVE)]);
+                const mJ = await mR.json(), rJ = await rR.json();
+                const mK = Object.keys(mJ)[0];
+                mJ[mK].forEach(r => {
+                    if (!r.grade) return;
+                    if (!mainQuizzes[r.grade]) mainQuizzes[r.grade] = {};
+                    if (!mainQuizzes[r.grade][r.subject]) mainQuizzes[r.grade][r.subject] = [];
+                    mainQuizzes[r.grade][r.subject].push({q: r.question, options: r.options?String(r.options).split(','):[], a: String(r.answer).trim()});
+                });
+                const rK = Object.keys(rJ)[0];
+                rJ[rK].forEach(r => { if(reviveQuizzes[r.level]) reviveQuizzes[r.level].push({q:r.question, options:r.options?String(r.options).split(','):[], a:String(r.answer).trim()}); });
+                document.getElementById('loader').style.display = 'none';
+                render();
+            } catch(e) { document.getElementById('loader').innerText = "連線失敗"; }
+        }
+
+        function render() {
+            document.getElementById('balance').innerText = currentBalance;
+            const board = document.getElementById('gradeBoard');
+            board.innerHTML = '';
+            grades.forEach((name, i) => {
+                const isLocked = (i + 1) > userProgress, isDone = (i + 1) < userProgress;
+                const card = document.createElement('div');
+                card.className = `packet ${isLocked ? 'locked' : ''} ${isDone ? 'done' : ''}`;
+                card.innerHTML = `<h3>${name}</h3><small>${isDone ? '已入袋' : '$200'}</small>`;
+                if (!isLocked && !isDone) card.onclick = () => openModal(i);
+                board.appendChild(card);
+            });
+        }
+
+        function openModal(idx) { currentGradeIdx = idx; document.getElementById('modal').style.display = 'flex'; if (failCount > 0) showRevive(); else showSelection(); }
+        function showSelection() {
+            document.getElementById('selectionArea').style.display = 'block';
+            document.getElementById('reviveArea').style.display = 'none';
+            const list = document.getElementById('subjectList');
+            list.innerHTML = '';
+            const allSubs = subjectsData[idxToType(currentGradeIdx)];
+            const restriction = ([0, 6, 9].includes(currentGradeIdx)) ? "" : lastUsedSubject;
+            allSubs.forEach(sub => {
+                const btn = document.createElement('button');
+                const isLast = sub === restriction, isFail = failedSubjects.includes(sub);
+                btn.className = `subject-btn ${isLast?'disabled':''} ${isFail?'failed':''}`;
+                btn.innerText = sub + (isFail?" (鎖死)": (isLast?" (冷卻)":""));
+                btn.onclick = () => { if(!isLast && !isFail) loadQuiz(sub); };
+                list.appendChild(btn);
+            });
+        }
+
+        function loadQuiz(sub) {
+            const pool = mainQuizzes[grades[currentGradeIdx]]?.[sub];
+            if(!pool) return success(sub);
+            displayQuestion(pool[Math.floor(Math.random()*pool.length)], sub, false);
+        }
+
+        function showRevive() {
+            const levels = ["會考題", "學測題", "藥師國考題"];
+            const curLevel = levels[failCount - 1];
+            const pool = reviveQuizzes[curLevel];
+            const quiz = pool[reviveCounters[curLevel] % pool.length];
+            reviveCounters[curLevel]++;
+            displayQuestion(quiz, curLevel, true);
+        }
+
+        function displayQuestion(quiz, sub, isRevive) {
+            document.getElementById('selectionArea').style.display = 'none';
+            document.getElementById('reviveArea').style.display = 'block';
+            document.getElementById('reviveLevelBadge').innerText = isRevive ? `復活: ${sub}` : sub;
+            document.getElementById('questionText').innerText = quiz.q;
+            const optList = document.getElementById('optionList');
+            optList.innerHTML = '';
+            quiz.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'option-btn';
+                btn.innerText = opt.trim();
+                btn.onclick = () => {
+                    if (opt.trim() === quiz.a) {
+                        showResultNotice('success', isRevive ? '復活成功！' : '答對了！', isRevive ? '請選擇剩餘科目' : '紅包 $200 已入袋', () => {
+                            if(isRevive) { failCount = 0; showSelection(); } else { success(sub); }
+                        });
+                    } else {
+                        if (isRevive) {
+                            failCount++;
+                            if (failCount > 3) endGame(); 
+                            else showResultNotice('fail', '又錯了！', '難度即將提升...', () => showRevive());
+                        } else {
+                            failedSubjects.push(sub);
+                            const res = ([0, 6, 9].includes(currentGradeIdx)) ? "" : lastUsedSubject;
+                            const left = subjectsData[idxToType(currentGradeIdx)].filter(s => !failedSubjects.includes(s) && s !== res);
+                            if (left.length === 0) {
+                                showResultNotice('fail', '挑戰失敗', '無可用科目，遊戲結束', () => endGame());
+                            } else {
+                                showResultNotice('fail', '科目鎖死！', '進入復活賽：會考題', () => { failCount = 1; showRevive(); });
+                            }
+                        }
+                    }
+                };
+                optList.appendChild(btn);
+            });
+        }
+
+        function success(sub) { currentBalance += 200; userProgress++; lastUsedSubject = sub; failedSubjects = []; failCount = 0; closeModal(); render(); if (userProgress > 12) setTimeout(() => endGame(true), 500); }
+        function endGame(p = false) {
+            document.getElementById('modal').style.display = 'none';
+            document.getElementById('gameOverOverlay').style.display = 'flex';
+            document.getElementById('finalBalance').innerText = '$' + currentBalance;
+            document.getElementById('resultTitle').innerText = p ? "🎊 大圓滿 🎊" : "遊戲結束";
+            document.getElementById('resultRank').innerText = p ? "最強紅包收割機！" : "再接再厲，知識就是財富！";
+        }
+        function idxToType(i) { return i < 6 ? "國小" : (i < 9 ? "國中" : "高中"); }
+        function closeModal() { document.getElementById('modal').style.display = 'none'; }
+        fetchAllQuizzes();
+    </script>
+</body>
+</html>
